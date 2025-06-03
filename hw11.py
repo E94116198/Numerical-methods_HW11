@@ -1,67 +1,105 @@
-import numpy as np
-from scipy.integrate import solve_ivp
-from scipy.optimize import root_scalar
-from scipy.linalg import solve_banded
-import matplotlib.pyplot as plt
+import numpy as np 
+from scipy.integrate import solve_ivp, quad
+from numpy.linalg import solve
 
-# === (a) Shooting Method ===
-def ode_system(x, Y):
-    y, yp = Y
-    dydx = yp
-    dypdx = -(x + 1) * yp + 2 * y + (1 - x**2) * np.exp(-x)
-    return [dydx, dypdx]
-
-def shooting_residual(guess):
-    sol = solve_ivp(ode_system, [0, 1], [1, guess], t_eval=[1])
-    return sol.y[0, -1] - 2  # y(1) = 2
-
-# 找正確的 y'(0)
-sol_root = root_scalar(shooting_residual, bracket=[0, 10], method='brentq')
-correct_slope = sol_root.root
-
-# 解常微分方程
-sol_shooting = solve_ivp(ode_system, [0, 1], [1, correct_slope], t_eval=np.linspace(0, 1, 11))
-x_vals = sol_shooting.t
-y_shooting = sol_shooting.y[0]
-
-# === (b) Finite Difference Method ===
+# ===================
+# 共用設定
+# ===================
 h = 0.1
-x = np.linspace(0, 1, 11)
-n = len(x)
+x_vals = np.linspace(0, 1, 11)
 
-A = np.zeros((3, n-2))  # 三對角矩陣格式
-b = np.zeros(n-2)
+# ===================
+# (a) Shooting Method
+# ===================
+def ode_sys(x, Y):
+    y, dy = Y
+    ddy = -(1 + x)*dy + 2*y + (1 - x**2)*np.exp(-x)
+    return [dy, ddy]
 
-for i in range(1, n-1):
-    xi = x[i]
-    A[0, i-1] = 1/h**2 - (xi + 1)/(2*h)          # 下對角
-    A[1, i-1] = -2/h**2 + 2                      # 主對角
-    A[2, i-1] = 1/h**2 + (xi + 1)/(2*h)          # 上對角
-    b[i-1] = (1 - xi**2) * np.exp(-xi)
+def shooting_method(y0, y1_target, tol=1e-8):
+    def integrate(s):
+        sol = solve_ivp(ode_sys, (0, 1), [y0, s], t_eval=x_vals)
+        return sol.y[0][-1], sol.y[0]
 
-# 邊界條件調整
-b[0] -= (1/h**2 - (x[1] + 1)/(2*h)) * 1
-b[-1] -= (1/h**2 + (x[-2] + 1)/(2*h)) * 2
+    s0, s1 = 0.0, 2.0
+    yb0, _ = integrate(s0)
+    yb1, y_values = integrate(s1)
 
-y_fd = np.zeros(n)
+    for _ in range(50):
+        s2 = s1 + (y1_target - yb1) * (s1 - s0) / (yb1 - yb0)
+        yb2, y_values = integrate(s2)
+        if abs(yb2 - y1_target) < tol:
+            return y_values
+        s0, yb0 = s1, yb1
+        s1, yb1 = s2, yb2
+    raise ValueError("Shooting method failed to converge.")
+
+y_shooting = shooting_method(1, 2)
+
+# ===================
+# (b) Finite Difference Method (改為第2段程式碼方式)
+# ===================
+N = 9
+A = np.zeros((N, N))
+b = np.zeros(N)
+
+for i in range(N):
+    xi = x_vals[i + 1]
+    pi = -(xi + 1)
+    qi = 2
+    ri = (1 - xi**2) * np.exp(-xi)
+
+    A[i, i] = 2 + h**2 * qi
+
+    if i > 0:
+        A[i, i - 1] = -1 - 0.5 * h * pi
+    else:
+        b[i] += (1 + 0.5 * h * pi) * 1
+
+    if i < N - 1:
+        A[i, i + 1] = -1 + 0.5 * h * pi
+    else:
+        b[i] += (1 - 0.5 * h * pi) * 2
+
+    b[i] += h**2 * ri
+
+y_fd_internal = np.linalg.solve(A, b)
+y_fd = np.zeros(11)
 y_fd[0] = 1
+y_fd[1:-1] = y_fd_internal
 y_fd[-1] = 2
-y_fd[1:-1] = solve_banded((1, 1), A, b)
 
-# === (c) Variation Approach ===
-# 以 shooting 方法近似，實務中此方法結果接近 shooting。
-y_variation = y_shooting.copy()
+# ===================
+# (c) Variation Approach (使用 sin 基底)
+# ===================
+def phi(i, x):
+    return np.sin(i * np.pi * x)
 
-# === 顯示答案 ===
-print("a. Shooting Method y(x):")
-for xi, yi in zip(x_vals, y_shooting):
-    print(f"x = {xi:.1f}, y = {yi:.6f}")
+def dphi(i, x):
+    return i * np.pi * np.cos(i * np.pi * x)
 
-print("\n" + "b. Finite Difference Method y(x):")
-for xi, yi in zip(x, y_fd):
-    print(f"x = {xi:.1f}, y = {yi:.6f}")
+N_var = 4
+A_var = np.zeros((N_var, N_var))
+b_var = np.zeros(N_var)
 
-print("\n" + "c. Variation Approach y(x):")
-for xi, yi in zip(x, y_variation):
-    print(f"x = {xi:.1f}, y = {yi:.6f}")
+for i in range(N_var):
+    for j in range(N_var):
+        A_var[i, j] = quad(lambda x: dphi(i+1, x)*dphi(j+1, x) + 2 * phi(i+1, x) * phi(j+1, x), 0, 1)[0]
+    b_var[i] = quad(lambda x: (1 - x**2)*np.exp(-x) * phi(i+1, x), 0, 1)[0]
 
+c = solve(A_var, b_var)
+
+def y_variational_fn(x):
+    base = 1 + (2 - 1) * x  # y_base(x)
+    correction = sum(c[i]*phi(i+1, x) for i in range(N_var))
+    return base + correction
+
+y_variational = np.array([y_variational_fn(xi) for xi in x_vals])
+
+# ===================
+# 表格輸出
+# ===================
+print(f"{'x':<4}|{'Shooting Method':^20}|{'Finite Difference Method':^26}|{'Variation Approach Method':^27}")
+print("-"*50)
+for i in range(len(x_vals)):
+    print(f"{x_vals[i]:<4.1f}|{y_shooting[i]:^20.6f}|{y_fd[i]:^26.6f}|{y_variational[i]:^27.6f}")
