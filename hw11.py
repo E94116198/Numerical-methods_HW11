@@ -2,15 +2,10 @@ import numpy as np
 from scipy.integrate import solve_ivp, quad
 from numpy.linalg import solve
 
-# ===================
-# 共用設定
-# ===================
 h = 0.1
 x_vals = np.linspace(0, 1, 11)
 
-# ===================
 # (a) Shooting Method
-# ===================
 def ode_sys(x, Y):
     y, dy = Y
     ddy = -(1 + x)*dy + 2*y + (1 - x**2)*np.exp(-x)
@@ -36,9 +31,7 @@ def shooting_method(y0, y1_target, tol=1e-8):
 
 y_shooting = shooting_method(1, 2)
 
-# ===================
-# (b) Finite Difference Method (改為第2段程式碼方式)
-# ===================
+# (b) Finite Difference Method
 N = 9
 A = np.zeros((N, N))
 b = np.zeros(N)
@@ -69,9 +62,7 @@ y_fd[0] = 1
 y_fd[1:-1] = y_fd_internal
 y_fd[-1] = 2
 
-# ===================
-# (c) Variation Approach (使用 sin 基底)
-# ===================
+# (c) Variation Approach 
 def phi(i, x):
     return np.sin(i * np.pi * x)
 
@@ -96,9 +87,7 @@ def y_variational_fn(x):
 
 y_variational = np.array([y_variational_fn(xi) for xi in x_vals])
 
-# ===================
 # 表格輸出
-# ===================
 print(f"{'x':<4}|{'Shooting Method':^20}|{'Finite Difference Method':^26}|{'Variation Approach Method':^27}")
 print("-"*50)
 for i in range(len(x_vals)):
